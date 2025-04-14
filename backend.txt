@@ -1,0 +1,155 @@
+# Backend Architecture for DiantebiMap (Python/FastAPI)
+
+This document outlines a recommended backend architecture for the DiantebiMap web application, focusing on scalability, performance, and maintainability using Python.
+
+## 1. Core Technologies
+
+*   **Programming Language:** Python 3.9+
+*   **Web Framework:** FastAPI (High-performance, async-native API framework)
+*   **Database:** PostgreSQL 13+ with PostGIS 3.x extension (Industry standard for spatial relational data)
+*   **Asynchronous Task Queue:** Celery (For background processing of imports and analyses)
+*   **Message Broker:** Redis or RabbitMQ (For Celery task queuing)
+*   **Caching:** Redis (For API response caching, session data if needed)
+*   **Tile Server:** `pg_tileserv`, `T-Rex`, or similar (Directly serves vector/raster tiles from PostGIS)
+*   **File Storage:** Cloud Object Storage (AWS S3, Google Cloud Storage, Azure Blob Storage)
+
+## 2. Key Python Libraries
+
+*   `fastapi`: Core web framework.
+*   `uvicorn`: ASGI server to run FastAPI.
+*   `sqlalchemy`: Core ORM for database interaction.
+*   `geoalchemy2`: SQLAlchemy extension for spatial types and functions (PostGIS integration).
+*   `psycopg2-binary` or `asyncpg`: PostgreSQL database drivers.
+*   `pydantic`: Data validation and settings management (used by FastAPI).
+*   `celery`: Distributed task queue.
+*   `redis` / `pika`: Client libraries for message brokers.
+*   `python-jose` or `PyJWT`: For handling JWT authentication.
+*   `passlib[bcrypt]`: Password hashing.
+*   `shapely`: Manipulation and analysis of planar geometric objects.
+*   `fiona`: Reading and writing vector data formats (Shapefiles, GeoJSON, KML, etc.). Requires GDAL.
+*   `rasterio`: Reading and writing raster data formats. Requires GDAL.
+*   `pyproj`: Coordinate system transformations (PROJ library bindings).
+*   `boto3` / `google-cloud-storage` / `azure-storage-blob`: Cloud storage interaction.
+*   `python-multipart`: For handling file uploads in FastAPI.
+
+## 3. Service Architecture (Microservices/Monolith)
+
+While a full microservices approach is possible, starting with a well-structured monolith or a "majestic monolith" using FastAPI's Routers or separate Apps is often more practical initially. Key functional areas can be logically separated:
+
+*   **API Service (FastAPI):** Handles all incoming HTTP requests, authentication, CRUD operations, and delegates long-running tasks.
+*   **Worker Service (Celery):** Executes background tasks like data import/conversion, complex spatial analysis, and report generation.
+*   **Tile Service (e.g., `pg_tileserv`):** Dedicated service optimized for serving map tiles directly from PostGIS. The API service might configure layers for the tile server but doesn't serve tiles itself for performance.
+
+## 4. Core Modules/Functionality
+
+*   **Authentication (`/auth`):**
+    *   User registration, login, password management.
+    *   JWT token generation and verification (access and refresh tokens).
+    *   OAuth2 password flow implementation.
+*   **Projects (`/projects`):**
+    *   CRUD operations for map projects (metadata, associated layers, extents, settings).
+    *   Permissions management (who can view/edit a project).
+*   **Layers (`/layers`):**
+    *   CRUD operations for layers within a project.
+    *   Metadata (name, description, source type, CRS).
+    *   Association with data sources.
+*   **Styles (`/styles`):**
+    *   CRUD operations for layer styling rules (compatible with Mapbox Style Specification where possible).
+    *   Storing simple styles (color, opacity) and data-driven styles.
+*   **Data Sources (`/datasources`):**
+    *   Metadata about original imported files or database connections.
+    *   Link layers back to their source.
+*   **Import (`/import`):**
+    *   API endpoint to accept file uploads (GeoJSON, Shapefile (.zip), KML, CSV, GeoTIFF, etc.).
+    *   **Implement file size limits** to prevent abuse and manage resources.
+    *   Triggers an asynchronous Celery task for processing.
+    *   Task involves:
+        *   Saving the raw file to object storage.
+        *   Using Fiona (vector) / Rasterio (raster) / GDAL to read the data.
+        *   Validating geometry/raster properties and attributes.
+        *   Transforming coordinates to a standard CRS (e.g., WGS84 - EPSG:4326 or Web Mercator - EPSG:3857).
+        *   Loading the processed data into the PostGIS database (vector features into tables, raster metadata/overview potentially stored, raw raster file linked from object storage).
+        *   Creating corresponding Layer and DataSource entries.
+        *   Updating import status via WebSocket or polling.
+*   **Database Connection (`/connections`):**
+    *   Securely store and manage connection details for external databases (PostGIS, etc.).
+    *   Endpoints to test connections and potentially list available tables/layers from connected databases.
+*   **Spatial Analysis (`/analysis` - Optional/Advanced):**
+    *   Endpoints to trigger spatial operations (buffer, intersect, union, etc.) via Celery tasks using GeoAlchemy/Shapely/PostGIS functions.
+*   **User Management (`/users`):**
+    *   Admin endpoints for managing users and roles.
+
+## 5. Database Schema Highlights (PostGIS)
+
+*   `users`: Standard user info, password hash.
+*   `projects`: Project metadata, owner (user_id FK).
+*   `layers`: Layer metadata, project_id FK, source_table_name, geometry_type, srid.
+*   `styles`: Styling rules (JSONB likely), layer_id FK.
+*   `data_sources`: Info about original source (file path in storage, db connection details, etc.).
+*   **Separate Data Tables:** Each imported vector layer would typically reside in its own table within a dedicated schema (e.g., `data_layers`). These tables would contain attribute columns and a `geometry` column (PostGIS `geometry` or `geography` type) with a spatial index (GIST).
+
+## 6. Deployment Considerations
+
+*   **Containerization:** Dockerize the FastAPI application, Celery workers, and potentially the tile server.
+*   **Orchestration:** Use Kubernetes, Docker Swarm, or similar for managing containers, scaling, and deployments.
+*   ** ASGI Server:** Run FastAPI using Uvicorn or Hypercorn.
+*   **Reverse Proxy:** Use Nginx or Traefik in front of Uvicorn to handle SSL termination, load balancing, and serving static files efficiently.
+*   **Database Management:** Use a managed PostgreSQL/PostGIS service (AWS RDS, Google Cloud SQL, Azure Database for PostgreSQL) or manage your own instance carefully.
+*   **CI/CD:** Implement automated testing and deployment pipelines (e.g., using GitHub Actions, GitLab CI).
+*   **Monitoring & Logging:** Integrate robust logging (e.g., ELK stack, Grafana Loki) and application performance monitoring (APM).
+
+## 7. Scalability & Performance
+
+*   **Async:** Leverage FastAPI's async nature for I/O bound tasks.
+*   **Task Queue:** Offload heavy processing to Celery workers, allowing the API to remain responsive.
+*   **Database Optimization:** Proper indexing (especially spatial indexes), connection pooling, and query optimization.
+*   **Tile Caching:** Utilize caching mechanisms in the tile server or via a CDN.
+*   **API Caching:** Cache frequently requested, non-dynamic API responses using Redis.
+*   **Horizontal Scaling:** Scale API instances and Celery workers independently based on load.
+
+## 8. File Transformation Workflow (Import to Viewable Layer)
+
+This section details the typical process of converting an uploaded geospatial file into a viewable map layer within the application, expanding on the `/import` functionality.
+
+1.  **File Reception & Staging (API Service - FastAPI):**
+    *   User uploads file (e.g., Shapefile `.zip`, `GeoTIFF`, `GeoJSON`, `KML`, `CSV`) via the frontend modal.
+    *   FastAPI endpoint (`/import`) receives the upload.
+    *   Basic validation (size limits, allowed types) is performed.
+    *   Raw file is uploaded/streamed to a staging area in cloud object storage (e.g., S3 bucket `uploads/`).
+
+2.  **Trigger Asynchronous Processing (Celery Task):**
+    *   API endpoint triggers a background Celery task (`process_import`).
+    *   Task receives details like the staged file path, target project ID, user ID, desired layer name.
+    *   API responds immediately to the frontend (e.g., `{"status": "processing", "task_id": "..."}`).
+
+3.  **File Processing (Worker Service - Celery):**
+    *   **Retrieve Data:** Celery worker fetches the staged file from object storage.
+    *   **Unpack (if needed):** Unzips archives (like for Shapefiles) into a temporary worker location.
+    *   **Read Data:** Uses libraries based on format:
+        *   Vector (`Shapefile`, `GeoJSON`, `KML`, `GML`): `fiona`.
+        *   Raster (`GeoTIFF`): `rasterio`.
+        *   Tabular (`CSV`/`XLSX` with coords): `pandas` + `geopandas`.
+    *   **Inspect & Validate:**
+        *   Detect Coordinate Reference System (CRS) using library metadata functions.
+        *   Validate geometries (vector) or raster properties (bands, data type).
+        *   Extract attribute schema (vector).
+        *   Handle errors or potentially clean data based on defined rules.
+    *   **Coordinate Transformation (Reprojection):**
+        *   Uses `pyproj` (often via `fiona`/`rasterio`/`geopandas`) to reproject data from its source CRS to a standard web CRS (typically **EPSG:4326** for storage/GeoJSON or **EPSG:3857** for direct tiling).
+    *   **Load to Spatial Database (PostGIS):**
+        *   **Vector:** Reprojected features and attributes are loaded into a *new PostGIS table* (e.g., `data_layers.layer_abc`) using `GeoAlchemy2` and `psycopg2`/`asyncpg`. A spatial index (GiST) is crucial.
+        *   **Raster:** Store *metadata* (extent, resolution, CRS, band info) in the database. Store the *reprojected* raster (preferably as a Cloud Optimized GeoTIFF - COG) back into object storage (e.g., S3 bucket `processed_rasters/`). The database record links to this processed raster file.
+    *   **Create Application Records:** Insert records into:
+        *   `data_sources` table (linking to the original staged file).
+        *   `layers` table (linking the project, user-friendly name, type, style info, and the PostGIS table name or raster metadata/path).
+
+4.  **Prepare for Serving (Tiling):**
+    *   **Vector:** Configure the Tile Server (e.g., `pg_tileserv`) to serve vector tiles (`.mvt`) from the newly created PostGIS table (`data_layers.layer_abc`). The `layers` record might store the resulting tile URL template.
+    *   **Raster:** Configure the Tile Server or use a GDAL utility (perhaps via another Celery task) to serve image tiles (`.png`/`.jpg`) based on the processed raster file (COG) in object storage. The `layers` record stores the raster tile URL template.
+
+5.  **Update Status & Frontend Consumption:**
+    *   Celery task reports completion status (success/failure with details) back to the main application (e.g., update a status field in the `layers` or a dedicated `import_jobs` table).
+    *   Frontend can poll for status or receive updates via WebSockets.
+    *   Once complete, the layer appears in the project. The frontend mapping library (Mapbox GL JS) uses the tile URL templates stored in the `layers` record to fetch and display map tiles as the user interacts with the map.
+
+This architecture provides a solid foundation for building a feature-rich, performant, and scalable GIS web application backend using Python. 

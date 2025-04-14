@@ -1,0 +1,55 @@
+{
+  "name": "diantebimap",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@mantine/core": "^6.0.17",
+    "@mantine/hooks": "^6.0.17",
+    "@mapbox/mapbox-gl-draw": "^1.5.0",
+    "@tabler/icons-react": "^2.30.0",
+    "axios": "^1.4.0",
+    "framer-motion": "^10.15.1",
+    "mapbox-gl": "^2.15.0",
+    "react": "^18.2.0",
+    "react-colorful": "^5.6.1",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.2.3",
+    "react-map-gl": "^7.1.0",
+    "react-router-dom": "^6.15.0",
+    "styled-components": "^6.0.7",
+    "turf": "^3.0.14",
+    "zustand": "^4.4.1"
+  },
+  "devDependencies": {
+    "@types/mapbox__mapbox-gl-draw": "^1.4.3",
+    "@types/mapbox-gl": "^2.7.13",
+    "@types/node": "^20.5.0",
+    "@types/react": "^18.2.20",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.4",
+    "typescript": "^5.1.6",
+    "vite": "^4.4.9"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
